@@ -51,7 +51,7 @@ impl GroqConfig {
         let get = |k: &str| {
             std::env::var(k)
                 .ok()
-                .map(|v| v.trim().to_string())
+                .map(|v| clean_env_value(&v))
                 .filter(|v| !v.is_empty())
         };
         let mut cfg = Self::new(&get("GROQ_API_KEY")?, &get("GROQ_MODEL")?);
@@ -60,6 +60,19 @@ impl GroqConfig {
         }
         Some(cfg)
     }
+}
+
+/// Hosting dashboards store values exactly as typed, so a value copied from a
+/// `.env` file often arrives wrapped in quotes. A quoted key gets rejected as
+/// invalid, which is easy to miss, so strip one pair of matching quotes.
+fn clean_env_value(raw: &str) -> String {
+    let v = raw.trim();
+    for q in ['"', '\''] {
+        if let Some(inner) = v.strip_prefix(q).and_then(|v| v.strip_suffix(q)) {
+            return inner.trim().to_string();
+        }
+    }
+    v.to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -436,6 +449,14 @@ mod tests {
         assert_eq!(facts["draft"], explain::summary(&e));
         assert_eq!(facts["denounced_by"][0]["counts_for"], "under 1%");
         assert!(facts["verdict_hangs_on"].is_null());
+    }
+
+    #[test]
+    fn quotes_pasted_into_a_dashboard_are_stripped() {
+        assert_eq!(clean_env_value("\"qwen/qwen3.8-27b\""), "qwen/qwen3.8-27b");
+        assert_eq!(clean_env_value(" 'gsk_abc' "), "gsk_abc");
+        assert_eq!(clean_env_value("gsk_abc"), "gsk_abc");
+        assert_eq!(clean_env_value("\"unbalanced"), "\"unbalanced");
     }
 
     #[test]
