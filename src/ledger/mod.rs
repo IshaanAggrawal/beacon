@@ -1,6 +1,16 @@
-//! Everything a project writes down about who it trusts.
-//!
-//! For now this only reads Vouch's `VOUCHED.td` format. Signed attestations
-//! and peer sync land on top of it.
+//! Everything a project writes down about who it trusts: its policy, its
+//! signed ledger, importers for existing Vouch files, and peer sync.
 
+pub mod attestation;
+pub mod policy;
+pub mod store;
 pub mod vouch_td;
+
+pub use attestation::{Attestation, Kind, Origin};
+pub use policy::{Policy, Settings};
+pub use store::Ledger;
+
+/// Where a project keeps its trust data, relative to the repo root.
+pub const TRUST_DIR: &str = ".trust";
+pub const POLICY_FILE: &str = "policy.toml";
+pub const LEDGER_FILE: &str = "ledger.jsonl";
