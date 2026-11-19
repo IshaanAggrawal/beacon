@@ -9,8 +9,10 @@ src/graph/     what a project concludes: trust in other projects, evidence about
 src/campaign/  cross-project campaign detection from content-free fingerprints
 src/triage/    combining trust and behavior into a verdict
 src/sim/       seeded federation simulator and the benchmark
+src/api/       local demo server: REST + server-sent events, UI embedded
 src/report.rs  plain-English rendering of graph results
 src/main.rs    CLI
+ui/            the demo page: plain HTML, CSS and JS, no build step
 ```
 
 This document records the decisions that weren't obvious, and what we gave up
@@ -247,3 +249,27 @@ why the template was used if an LLM was configured. The key is never logged:
 names and denouncement reasons, which are all public data. They contain no PR
 content. Projects that don't want to send even that simply don't set a
 key.
+
+## Demo server
+
+`beacon serve` runs the simulation behind a small axum server bound to
+localhost. The page and its fonts are embedded with rust-embed, so the binary is
+the whole demo; there's no build step and nothing loads from a CDN.
+
+| Endpoint | What it returns |
+|---|---|
+| `GET /api/scenario` | The world's projects and populations, and the final scoreboard |
+| `GET /api/stream` | Every PR in time order as server-sent events, at `speed` PRs per second |
+| `GET /api/graph` | Trust from `root`, as known right after PR `upto` (campaign flags until then) |
+| `GET /api/verdict` | PR `i`'s evidence, its card and its summary (LLM or template) |
+
+All take `seed`, `hostile` and `sybil`. Scenarios are deterministic, so each is
+computed once and cached. The attack toggles remove the hostile project or the
+Sybil ring from the *same* world, so the PR stream is identical with and without
+them and the comparison is clean.
+
+The graph is drawn as a schematic: columns are hops from the root, nodes sit on
+the page's 24px grid, and each node's square fills with the root's trust in it.
+Picking a PR switches the graph to the receiving project's point of view and
+lights up the paths its evidence took. The projects the verdict hangs on are
+outlined with a dashed border.
