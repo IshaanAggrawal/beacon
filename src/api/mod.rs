@@ -141,9 +141,37 @@ impl Limits {
     }
 }
 
+/// A scenario that's built once, however many requests ask for it at once.
+type Slot = Arc<tokio::sync::OnceCell<Arc<Scenario>>>;
+
+/// The default page and its attack toggles, in the order a visitor is
+/// likely to need them. Built at startup so toggles answer instantly.
+const WARM: [ScenarioKey; 4] = [
+    ScenarioKey {
+        seed: 1,
+        hostile: false,
+        sybil: false,
+    },
+    ScenarioKey {
+        seed: 1,
+        hostile: true,
+        sybil: true,
+    },
+    ScenarioKey {
+        seed: 1,
+        hostile: true,
+        sybil: false,
+    },
+    ScenarioKey {
+        seed: 1,
+        hostile: false,
+        sybil: true,
+    },
+];
+
 struct AppState {
     /// Each scenario with when it was last used, for eviction.
-    scenarios: Mutex<HashMap<ScenarioKey, (Instant, Arc<Scenario>)>>,
+    scenarios: Mutex<HashMap<ScenarioKey, (Instant, Slot)>>,
     summaries: Mutex<HashMap<(ScenarioKey, usize), Explanation>>,
     llm: Option<GroqConfig>,
     limits: Limits,
@@ -165,32 +193,45 @@ impl AppState {
     }
 
     async fn scenario(&self, key: ScenarioKey) -> Arc<Scenario> {
-        if let Some((used, s)) = self.scenarios.lock().expect("lock").get_mut(&key) {
-            *used = Instant::now();
-            return s.clone();
-        }
-        let built = tokio::task::spawn_blocking(move || {
-            let world = World::scenario(key.seed, key.hostile, key.sybil);
-            let run = sim::run(&world);
-            Arc::new(Scenario { world, run })
+        let slot = {
+            let mut cache = self.scenarios.lock().expect("lock");
+            if let Some((used, slot)) = cache.get_mut(&key) {
+                *used = Instant::now();
+                slot.clone()
+            } else {
+                while cache.len() >= self.limits.max_scenarios {
+                    let oldest = cache
+                        .iter()
+                        .min_by_key(|(_, (used, _))| *used)
+                        .map(|(k, _)| *k)
+                        .expect("cache isn't empty");
+                    cache.remove(&oldest);
+                }
+                let slot = Slot::default();
+                cache.insert(key, (Instant::now(), slot.clone()));
+                slot
+            }
+        };
+        // On a 0.1 CPU instance a scenario takes seconds to simulate; requests
+        // that arrive meanwhile wait for the same run instead of starting more.
+        slot.get_or_init(|| async move {
+            tokio::task::spawn_blocking(move || {
+                let world = World::scenario(key.seed, key.hostile, key.sybil);
+                let run = sim::run(&world);
+                Arc::new(Scenario { world, run })
+            })
+            .await
+            .expect("simulation task doesn't panic")
         })
         .await
-        .expect("simulation task doesn't panic");
+        .clone()
+    }
 
-        let mut cache = self.scenarios.lock().expect("lock");
-        while cache.len() >= self.limits.max_scenarios && !cache.contains_key(&key) {
-            let oldest = cache
-                .iter()
-                .min_by_key(|(_, (used, _))| *used)
-                .map(|(k, _)| *k)
-                .expect("cache isn't empty");
-            cache.remove(&oldest);
+    /// Builds the scenarios a visitor will hit first.
+    async fn warm(&self) {
+        for key in WARM.iter().take(self.limits.max_scenarios) {
+            self.scenario(*key).await;
         }
-        cache
-            .entry(key)
-            .or_insert((Instant::now(), built))
-            .1
-            .clone()
     }
 
     /// Takes one LLM call from this hour's budget, if any are left.
@@ -209,7 +250,10 @@ impl AppState {
 }
 
 pub fn router(llm: Option<GroqConfig>, limits: Limits) -> Router {
-    let state = Arc::new(AppState::new(llm, limits));
+    app(Arc::new(AppState::new(llm, limits)))
+}
+
+fn app(state: Shared) -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
         .route("/api/scenario", get(scenario))
@@ -226,7 +270,10 @@ pub async fn serve(
     limits: Limits,
 ) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, router(llm, limits)).await
+    let state = Arc::new(AppState::new(llm, limits));
+    let warming = state.clone();
+    tokio::spawn(async move { warming.warm().await });
+    axum::serve(listener, app(state)).await
 }
 
 // --- /api/scenario ----------------------------------------------------------
@@ -723,6 +770,26 @@ mod tests {
             !cache.keys().any(|k| k.seed == 1),
             "least recently used goes first"
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn simultaneous_requests_share_one_simulation() {
+        let state = Arc::new(AppState::new(None, Limits::default()));
+        let key = ScenarioKey {
+            seed: 5,
+            hostile: true,
+            sybil: true,
+        };
+        let (a, b) = tokio::join!(state.scenario(key), state.scenario(key));
+        assert!(Arc::ptr_eq(&a, &b));
+    }
+
+    #[tokio::test]
+    async fn warming_builds_the_default_page_and_its_toggles() {
+        let state = AppState::new(None, Limits::default());
+        state.warm().await;
+        let cache = state.scenarios.lock().unwrap();
+        assert!(WARM.iter().all(|k| cache[k].1.initialized()));
     }
 
     #[test]
