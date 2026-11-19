@@ -68,7 +68,7 @@ async function loadScenario() {
   $("stream-empty").hidden = false;
   $("card").hidden = true;
   $("play").textContent = "Replay 14 days";
-  setClock("Loading the simulated federation…");
+  setClock("Simulating 14 days across 30 projects. The first time can take a few seconds…");
 
   state.info = await getJSON("/api/scenario");
   const root = $("root");
@@ -543,6 +543,12 @@ $("root").addEventListener("change", (e) => {
   refreshGraph(Math.max(0, state.next - 1), true).catch(fail);
 });
 $("filter").addEventListener("change", rerenderStream);
+
+// Free hosting sleeps after 15 idle minutes. While this tab is open and on
+// screen, check in now and then so the demo doesn't fall asleep mid-talk.
+setInterval(() => {
+  if (document.visibilityState === "visible") fetch("/healthz").catch(() => {});
+}, 10 * 60 * 1000);
 
 function fail(err) {
   setClock(`Something went wrong talking to the demo server: ${err.message}`);
