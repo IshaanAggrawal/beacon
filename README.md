@@ -43,6 +43,10 @@ Sybil ring**, and press **Replay 14 days**. Things to watch:
 
 You can link straight to a run: `/?hostile=1&sybil=1&play=320`.
 
+Live demo: <https://beacon-demo-8v3b.onrender.com> (free hosting, so the first
+visit after a quiet spell takes about a minute to wake). Presenting it? See
+[docs/PRESENTING.md](docs/PRESENTING.md).
+
 ### Deploy it
 
 It's one container with no database or disk. Run it anywhere:
