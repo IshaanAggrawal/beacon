@@ -132,6 +132,13 @@ enum Command {
         #[arg(long)]
         no_llm: bool,
     },
+    /// Run the interactive demo in your browser.
+    Serve {
+        #[arg(long, default_value = "127.0.0.1:8080")]
+        addr: std::net::SocketAddr,
+        #[arg(long)]
+        no_llm: bool,
+    },
     /// Replay a simulated federation through flat Vouch and through beacon.
     Bench {
         /// First seed to run.
@@ -257,6 +264,24 @@ Judged {} PRs in {:.0} ms.
                 TrustEngine::new(&net, &policy.project.id, policy.settings.clone(), now).run();
             let evidence = triage::assess(&view, &handle, None, &Thresholds::default());
             print_verdict(&evidence, llm(no_llm).as_ref());
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Serve { addr, no_llm } => {
+            let llm = llm(no_llm);
+            println!("beacon demo running at http://{addr}");
+            match &llm {
+                Some(c) => println!(
+                    "  Summaries are written by {} when it's available.",
+                    c.model
+                ),
+                None => println!(
+                    "  Summaries come from the built-in template (set GROQ_API_KEY and GROQ_MODEL to use an LLM)."
+                ),
+            }
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()?
+                .block_on(beacon::api::serve(addr, llm))?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Sample { seed, no_llm } => {
