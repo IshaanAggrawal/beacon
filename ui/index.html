@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>beacon trust network</title>
+  <meta name="description" content="Watch a decentralized trust network keep coordinated pull-request spam out without locking newcomers out.">
+  <link rel="preload" href="fonts/JetBrainsMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="fonts/DepartureMono-Regular.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="masthead">
+    <div class="brand">
+      <h1 class="wordmark">beacon</h1>
+      <p class="lede">Thirty open-source projects, each keeping its own signed list of who it trusts. Replay fourteen days of pull requests and see what each project decides, and why.</p>
+    </div>
+
+    <div class="controls" role="group" aria-label="Simulation controls">
+      <button id="play" class="primary" type="button">Replay 14 days</button>
+      <div class="speed" role="radiogroup" aria-label="Replay speed">
+        <button type="button" role="radio" data-speed="20" aria-checked="false">1×</button>
+        <button type="button" role="radio" data-speed="80" aria-checked="true">4×</button>
+        <button type="button" role="radio" data-speed="320" aria-checked="false">16×</button>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="hostile">
+        <span class="track" aria-hidden="true"></span>
+        <span>Inject hostile project</span>
+      </label>
+      <label class="switch">
+        <input type="checkbox" id="sybil">
+        <span class="track" aria-hidden="true"></span>
+        <span>Inject Sybil ring</span>
+      </label>
+      <label class="seed">Seed <input id="seed" type="number" min="1" max="999" value="1" inputmode="numeric"></label>
+    </div>
+    <p class="clock" id="clock" aria-live="polite">Press replay to start. Each project judges the pull requests it receives using only what it knows at that moment.</p>
+  </header>
+
+  <main class="board">
+    <section class="graph-panel" aria-labelledby="graph-title">
+      <div class="panel-head">
+        <h2 id="graph-title">Trust as seen by <select id="root" aria-label="Project whose point of view to show"></select></h2>
+        <p class="hint" id="graph-hint">Columns are hops away. Filled squares are trusted; the fuller, the more.</p>
+      </div>
+      <div class="readout" id="readout" hidden>
+        <span class="readout-label" id="readout-label"></span>
+        <span class="readout-value" id="readout-value"></span>
+        <span class="readout-why" id="readout-why"></span>
+      </div>
+      <div class="graph-scroll">
+        <svg id="graph" role="img" aria-labelledby="graph-title"></svg>
+      </div>
+      <ul class="legend">
+        <li><span class="key key-trust"></span>Trusted project</li>
+        <li><span class="key key-hostile"></span>Hostile project</li>
+        <li><span class="key key-sybil"></span>Sybil ring</li>
+        <li><span class="key key-hangs"></span>Verdict hangs on it</li>
+      </ul>
+    </section>
+
+    <section class="stream-panel" aria-labelledby="stream-title">
+      <div class="panel-head">
+        <h2 id="stream-title">Pull requests, newest first</h2>
+        <label class="filter">Show
+          <select id="filter">
+            <option value="all">everything</option>
+            <option value="quarantined">quarantined</option>
+            <option value="review">let through with a warning</option>
+            <option value="newcomer">newcomers</option>
+          </select>
+        </label>
+      </div>
+      <ol class="stream" id="stream" aria-live="off"></ol>
+      <p class="empty" id="stream-empty">Nothing yet. Replay the fourteen days to watch pull requests arrive.</p>
+    </section>
+
+    <section class="score-panel" aria-labelledby="score-title">
+      <div class="panel-head">
+        <h2 id="score-title">The same pull requests, judged four ways</h2>
+        <p class="hint">Live counts. The first three are flat Vouch lists, as used today. Spam means coordinated campaigns.</p>
+      </div>
+      <div class="table-scroll">
+        <table class="scores">
+          <thead>
+            <tr>
+              <th scope="col">Approach</th>
+              <th scope="col">Spam caught</th>
+              <th scope="col">Offenders caught</th>
+              <th scope="col">Newcomers blocked</th>
+              <th scope="col">Honest people blocked</th>
+              <th scope="col">Smears that landed</th>
+            </tr>
+          </thead>
+          <tbody id="scores"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card-panel" id="card" aria-live="polite" hidden></section>
+  </main>
+
+  <footer class="foot">
+    <p>Everything here is simulated except Ghostty's vouch list, which is real with its handles replaced. No data leaves your machine unless an LLM key is configured. <a href="https://github.com/IshaanAggrawal/beacon">Source and benchmarks</a></p>
+  </footer>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>
