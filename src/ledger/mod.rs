@@ -2,6 +2,7 @@
 //! signed ledger, importers for existing Vouch files, and peer sync.
 
 pub mod attestation;
+pub mod import;
 pub mod policy;
 pub mod store;
 pub mod vouch_td;
