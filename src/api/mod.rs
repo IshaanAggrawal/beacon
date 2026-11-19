@@ -8,12 +8,18 @@
 //! - `GET /api/stream`    the 14 days of PRs, replayed as SSE (`speed` PRs/s)
 //! - `GET /api/graph`     trust from `root` as known just after PR `upto`
 //! - `GET /api/verdict`   evidence card and summary for PR `i`
+//! - `GET /healthz`       liveness check for hosting platforms
+//!
+//! [`Limits`] keeps a public deployment healthy on a small instance: memory
+//! for cached scenarios is capped, and so is how many LLM calls visitors can
+//! trigger per hour.
 
 use std::collections::{BTreeMap, HashMap};
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use std::time::Instant;
 
 use axum::extract::{Query, State};
 use axum::http::{StatusCode, Uri, header};
@@ -73,7 +79,7 @@ struct Params {
 impl Params {
     fn key(&self) -> ScenarioKey {
         ScenarioKey {
-            seed: self.seed,
+            seed: self.seed.clamp(1, 999),
             hostile: self.hostile,
             sybil: self.sybil,
         }
@@ -93,17 +99,74 @@ struct Scenario {
     run: Run,
 }
 
+/// Caps for running in public on a small instance.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Limits {
+    /// Scenarios kept in memory at once; the least recently used goes first.
+    pub max_scenarios: usize,
+    /// Cached summaries before the cache is cleared.
+    pub max_summaries: usize,
+    /// LLM summaries per hour across all visitors. After that, the built-in
+    /// template answers until the hour is up, so a public demo can't burn
+    /// through the key's quota.
+    pub llm_per_hour: u32,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_scenarios: 8,
+            max_summaries: 5_000,
+            llm_per_hour: 120,
+        }
+    }
+}
+
+impl Limits {
+    /// Defaults, overridden by `BEACON_MAX_SCENARIOS` and `BEACON_LLM_PER_HOUR`.
+    pub fn from_env() -> Self {
+        let mut l = Self::default();
+        let num = |k: &str| {
+            std::env::var(k)
+                .ok()
+                .and_then(|v| v.trim().parse::<u64>().ok())
+        };
+        if let Some(n) = num("BEACON_MAX_SCENARIOS") {
+            l.max_scenarios = (n as usize).max(1);
+        }
+        if let Some(n) = num("BEACON_LLM_PER_HOUR") {
+            l.llm_per_hour = n.min(u64::from(u32::MAX)) as u32;
+        }
+        l
+    }
+}
+
 struct AppState {
-    scenarios: Mutex<HashMap<ScenarioKey, Arc<Scenario>>>,
+    /// Each scenario with when it was last used, for eviction.
+    scenarios: Mutex<HashMap<ScenarioKey, (Instant, Arc<Scenario>)>>,
     summaries: Mutex<HashMap<(ScenarioKey, usize), Explanation>>,
     llm: Option<GroqConfig>,
+    limits: Limits,
+    /// Start of the current hour, and LLM calls made in it.
+    llm_window: Mutex<(Instant, u32)>,
 }
 
 type Shared = Arc<AppState>;
 
 impl AppState {
+    fn new(llm: Option<GroqConfig>, limits: Limits) -> Self {
+        Self {
+            scenarios: Mutex::new(HashMap::new()),
+            summaries: Mutex::new(HashMap::new()),
+            llm,
+            limits,
+            llm_window: Mutex::new((Instant::now(), 0)),
+        }
+    }
+
     async fn scenario(&self, key: ScenarioKey) -> Arc<Scenario> {
-        if let Some(s) = self.scenarios.lock().expect("lock").get(&key) {
+        if let Some((used, s)) = self.scenarios.lock().expect("lock").get_mut(&key) {
+            *used = Instant::now();
             return s.clone();
         }
         let built = tokio::task::spawn_blocking(move || {
@@ -113,22 +176,42 @@ impl AppState {
         })
         .await
         .expect("simulation task doesn't panic");
-        self.scenarios
-            .lock()
-            .expect("lock")
+
+        let mut cache = self.scenarios.lock().expect("lock");
+        while cache.len() >= self.limits.max_scenarios && !cache.contains_key(&key) {
+            let oldest = cache
+                .iter()
+                .min_by_key(|(_, (used, _))| *used)
+                .map(|(k, _)| *k)
+                .expect("cache isn't empty");
+            cache.remove(&oldest);
+        }
+        cache
             .entry(key)
-            .or_insert(built)
+            .or_insert((Instant::now(), built))
+            .1
             .clone()
+    }
+
+    /// Takes one LLM call from this hour's budget, if any are left.
+    fn take_llm_call(&self) -> bool {
+        let mut w = self.llm_window.lock().expect("lock");
+        if w.0.elapsed() >= Duration::from_secs(3600) {
+            *w = (Instant::now(), 0);
+        }
+        if w.1 < self.limits.llm_per_hour {
+            w.1 += 1;
+            true
+        } else {
+            false
+        }
     }
 }
 
-pub fn router(llm: Option<GroqConfig>) -> Router {
-    let state = Arc::new(AppState {
-        scenarios: Mutex::new(HashMap::new()),
-        summaries: Mutex::new(HashMap::new()),
-        llm,
-    });
+pub fn router(llm: Option<GroqConfig>, limits: Limits) -> Router {
+    let state = Arc::new(AppState::new(llm, limits));
     Router::new()
+        .route("/healthz", get(|| async { "ok" }))
         .route("/api/scenario", get(scenario))
         .route("/api/stream", get(stream))
         .route("/api/graph", get(graph))
@@ -137,9 +220,13 @@ pub fn router(llm: Option<GroqConfig>) -> Router {
         .with_state(state)
 }
 
-pub async fn serve(addr: SocketAddr, llm: Option<GroqConfig>) -> std::io::Result<()> {
+pub async fn serve(
+    addr: SocketAddr,
+    llm: Option<GroqConfig>,
+    limits: Limits,
+) -> std::io::Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, router(llm)).await
+    axum::serve(listener, router(llm, limits)).await
 }
 
 // --- /api/scenario ----------------------------------------------------------
@@ -469,15 +556,25 @@ async fn verdict(
     let summary = match cached {
         Some(s) => s,
         None => {
+            let over_budget = st.llm.is_some() && !st.take_llm_call();
+            let llm = if over_budget { None } else { st.llm.clone() };
             let ev = evidence.clone();
-            let llm = st.llm.clone();
-            let s = tokio::task::spawn_blocking(move || groq::explain(&ev, llm.as_ref()))
+            let mut s = tokio::task::spawn_blocking(move || groq::explain(&ev, llm.as_ref()))
                 .await
                 .expect("explainer doesn't panic");
-            st.summaries
-                .lock()
-                .expect("lock")
-                .insert((key, i), s.clone());
+            if over_budget {
+                s.author = groq::Author::Template {
+                    why: Some("this demo's hourly LLM budget is used up".into()),
+                };
+            } else {
+                // Budget fallbacks aren't cached, so the LLM gets another
+                // chance once the hour is up.
+                let mut cache = st.summaries.lock().expect("lock");
+                if cache.len() >= st.limits.max_summaries {
+                    cache.clear();
+                }
+                cache.insert((key, i), s.clone());
+            }
             s
         }
     };
@@ -548,7 +645,7 @@ mod tests {
 
     #[tokio::test]
     async fn scenario_graph_and_verdict_endpoints() {
-        let app = router(None);
+        let app = router(None, Limits::default());
 
         let (status, info) =
             get_json(app.clone(), "/api/scenario?seed=1&hostile=true&sybil=true").await;
@@ -593,8 +690,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn health_check_and_seed_clamping() {
+        let app = router(None, Limits::default());
+        let resp = app
+            .clone()
+            .oneshot(Request::get("/healthz").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let (_, info) = get_json(app, "/api/scenario?seed=123456").await;
+        assert_eq!(info["seed"], 999);
+    }
+
+    #[tokio::test]
+    async fn scenario_cache_is_bounded() {
+        let limits = Limits {
+            max_scenarios: 2,
+            ..Limits::default()
+        };
+        let state = AppState::new(None, limits);
+        for seed in 1..=3 {
+            let key = ScenarioKey {
+                seed,
+                hostile: false,
+                sybil: false,
+            };
+            state.scenario(key).await;
+        }
+        let cache = state.scenarios.lock().unwrap();
+        assert_eq!(cache.len(), 2);
+        assert!(
+            !cache.keys().any(|k| k.seed == 1),
+            "least recently used goes first"
+        );
+    }
+
+    #[test]
+    fn llm_budget_runs_out_and_resets() {
+        let limits = Limits {
+            llm_per_hour: 2,
+            ..Limits::default()
+        };
+        let state = AppState::new(None, limits);
+        assert!(state.take_llm_call() && state.take_llm_call());
+        assert!(!state.take_llm_call());
+        *state.llm_window.lock().unwrap() = (Instant::now() - Duration::from_secs(3601), 2);
+        assert!(state.take_llm_call());
+    }
+
+    #[tokio::test]
     async fn serves_the_ui() {
-        let resp = router(None)
+        let resp = router(None, Limits::default())
             .oneshot(Request::get("/").body(Body::empty()).unwrap())
             .await
             .unwrap();

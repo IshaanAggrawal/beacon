@@ -133,9 +133,12 @@ enum Command {
         no_llm: bool,
     },
     /// Run the interactive demo in your browser.
+    ///
+    /// Listens on 127.0.0.1:8080 unless --addr is given. If PORT is set, as
+    /// hosting platforms do, it listens on 0.0.0.0:$PORT instead.
     Serve {
-        #[arg(long, default_value = "127.0.0.1:8080")]
-        addr: std::net::SocketAddr,
+        #[arg(long)]
+        addr: Option<std::net::SocketAddr>,
         #[arg(long)]
         no_llm: bool,
     },
@@ -267,12 +270,20 @@ Judged {} PRs in {:.0} ms.
             Ok(ExitCode::SUCCESS)
         }
         Command::Serve { addr, no_llm } => {
+            let port = std::env::var("PORT")
+                .ok()
+                .and_then(|p| p.parse::<u16>().ok());
+            let addr = addr.unwrap_or_else(|| match port {
+                Some(port) => std::net::SocketAddr::from(([0, 0, 0, 0], port)),
+                None => std::net::SocketAddr::from(([127, 0, 0, 1], 8080)),
+            });
             let llm = llm(no_llm);
+            let limits = beacon::api::Limits::from_env();
             println!("beacon demo running at http://{addr}");
             match &llm {
                 Some(c) => println!(
-                    "  Summaries are written by {} when it's available.",
-                    c.model
+                    "  Summaries are written by {} when it's available (up to {} an hour).",
+                    c.model, limits.llm_per_hour
                 ),
                 None => println!(
                     "  Summaries come from the built-in template (set GROQ_API_KEY and GROQ_MODEL to use an LLM)."
@@ -281,7 +292,7 @@ Judged {} PRs in {:.0} ms.
             tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?
-                .block_on(beacon::api::serve(addr, llm))?;
+                .block_on(beacon::api::serve(addr, llm, limits))?;
             Ok(ExitCode::SUCCESS)
         }
         Command::Sample { seed, no_llm } => {
