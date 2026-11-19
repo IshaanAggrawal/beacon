@@ -1,0 +1,13 @@
+# Only Cargo files, src/, ui/ and data/ are needed to build the image.
+target
+.git
+.github
+.claude
+.env
+.env.*
+!.env.example
+docs
+scripts
+tests
+*.md
+!README.md

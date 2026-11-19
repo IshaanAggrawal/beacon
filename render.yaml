@@ -1,0 +1,22 @@
+# Render Blueprint: one free Docker web service running the demo.
+# New > Blueprint in the Render dashboard, then pick this repo.
+services:
+  - type: web
+    name: beacon-demo
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+    envVars:
+      # Keep memory well under the free plan's 512 MB.
+      - key: BEACON_MAX_SCENARIOS
+        value: "6"
+      # Cap LLM summaries per hour so visitors can't use up your Groq quota.
+      - key: BEACON_LLM_PER_HOUR
+        value: "60"
+      # Optional. Leave both empty to use the built-in summaries only.
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        sync: false
