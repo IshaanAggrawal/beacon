@@ -16,6 +16,8 @@ use beacon::ledger::vouch_td::{Handle, Standing, VouchList};
 use beacon::ledger::{Attestation, Kind, LEDGER_FILE, Ledger, POLICY_FILE, Policy, TRUST_DIR};
 use beacon::report;
 use beacon::sim::{self, World, WorldConfig};
+use beacon::triage::groq::Author;
+use beacon::triage::{self, GroqConfig, Thresholds};
 
 #[derive(Parser)]
 #[command(name = "beacon", version, about)]
@@ -116,6 +118,20 @@ enum Command {
     Peers,
     /// Explain what the projects you trust say about a user.
     Why { user: String },
+    /// Decide on a user and explain the verdict.
+    Verdict {
+        user: String,
+        /// Use the built-in template even if an LLM is configured.
+        #[arg(long)]
+        no_llm: bool,
+    },
+    /// Show evidence cards for a few representative PRs from the simulation.
+    Sample {
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        #[arg(long)]
+        no_llm: bool,
+    },
     /// Replay a simulated federation through flat Vouch and through beacon.
     Bench {
         /// First seed to run.
@@ -141,6 +157,8 @@ struct Note {
 }
 
 fn main() -> ExitCode {
+    // Optional: GROQ_API_KEY and GROQ_MODEL for the LLM explainer.
+    let _ = dotenvy::dotenv();
     match run(Cli::parse()) {
         Ok(code) => code,
         Err(err) => {
@@ -232,6 +250,28 @@ Judged {} PRs in {:.0} ms.
             }
             Ok(ExitCode::SUCCESS)
         }
+        Command::Verdict { user, no_llm } => {
+            let (policy, net, _) = load(dir, now)?;
+            let handle = Handle::parse(&user, &policy.project.forge).to_string();
+            let view =
+                TrustEngine::new(&net, &policy.project.id, policy.settings.clone(), now).run();
+            let evidence = triage::assess(&view, &handle, None, &Thresholds::default());
+            print_verdict(&evidence, llm(no_llm).as_ref());
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Sample { seed, no_llm } => {
+            let world = World::generate(WorldConfig {
+                seed,
+                ..WorldConfig::default()
+            });
+            let run = sim::run(&world);
+            let llm = llm(no_llm);
+            for (title, idx) in sim::bench::samples(&world, &run) {
+                println!("── {title} ──");
+                print_verdict(&run.evidence[idx], llm.as_ref());
+            }
+            Ok(ExitCode::SUCCESS)
+        }
         Command::Why { user } => {
             let (policy, net, _) = load(dir, now)?;
             let handle = Handle::parse(&user, &policy.project.forge).to_string();
@@ -247,6 +287,30 @@ Judged {} PRs in {:.0} ms.
             Ok(ExitCode::SUCCESS)
         }
     }
+}
+
+fn llm(disabled: bool) -> Option<GroqConfig> {
+    if disabled {
+        None
+    } else {
+        GroqConfig::from_env()
+    }
+}
+
+fn print_verdict(evidence: &triage::Evidence, llm: Option<&GroqConfig>) {
+    print!("{}", triage::explain::card(evidence));
+    let note = triage::groq::explain(evidence, llm);
+    let by = match &note.author {
+        Author::Llm { model } => format!("written by {model}"),
+        Author::Template { why: None } => "built-in template".to_string(),
+        Author::Template { why: Some(why) } => format!("built-in template; {why}"),
+    };
+    println!(
+        "  Summary ({by}):
+    {}
+",
+        note.text
+    );
 }
 
 fn inspect(path: &Path, platform: &str) -> Result<ExitCode> {

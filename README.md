@@ -20,9 +20,8 @@ beacon builds on [Vouch](https://github.com/mitchellh/vouch) and reads its
 `VOUCHED.td` format directly. See [docs/RESEARCH.md](docs/RESEARCH.md) for what we
 learned from Ghostty's real list and what a network adds over a flat list.
 
-> **Status:** early. Signed ledgers, Vouch import, peer sync, the trust graph and
-> campaign detection work. Explanations, the LLM explainer and the web demo are
-> in progress.
+> **Status:** early. Signed ledgers, Vouch import, peer sync, the trust graph,
+> campaign detection and explained verdicts work. The web demo is in progress.
 
 ## Try it
 
@@ -45,8 +44,21 @@ beacon trust zig 0.8 --url https://github.com/ziglang/zig
 beacon sync                                     # fetch peers' signed ledgers (read-only)
 beacon peers                                    # how much you trust each project, and why
 beacon why github:newcomer                      # what the projects you trust say about someone
+beacon verdict github:newcomer                  # the decision, the evidence card and a two-line summary
 beacon verify                                   # check every signature and the hash chain
 ```
+
+See what verdicts look like on a simulated federation, including a campaign
+catch, a smear that doesn't land and a quarantine that rests on one project:
+
+```sh
+cargo run --release -- sample
+```
+
+Summaries come from a built-in template. To have an LLM write them instead,
+copy `.env.example` to `.env` and set `GROQ_API_KEY` and `GROQ_MODEL` (any chat
+model Groq serves). If the LLM is unavailable or says something that doesn't
+match the verdict, beacon quietly uses the template.
 
 Compare beacon with flat Vouch lists on a simulated federation:
 

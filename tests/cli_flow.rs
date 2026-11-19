@@ -8,6 +8,11 @@ const NOW: &str = "2026-11-19T00:00:00Z";
 
 fn beacon(dir: &Path, args: &[&str]) -> (bool, String) {
     let out = Command::new(BIN)
+        // Never reach a real LLM from tests: no keys in the environment, and
+        // run outside the repo so a developer's .env isn't picked up.
+        .env_remove("GROQ_API_KEY")
+        .env_remove("GROQ_MODEL")
+        .current_dir(dir)
         .arg("--dir")
         .arg(dir)
         .args(["--at", NOW])
@@ -71,6 +76,15 @@ fn a_peer_vouch_reaches_us_and_a_tampered_peer_is_ignored() {
 
     let why = ok(&home, &["why", "spammer"]);
     assert!(why.contains("Denounced by 1 project"), "{why}");
+
+    // One peer at 80% isn't enough to quarantine on its own.
+    let verdict = ok(&home, &["verdict", "spammer", "--no-llm"]);
+    assert!(verdict.contains("Clean newcomer"), "{verdict}");
+    assert!(verdict.contains("same PR in 30 repos"), "{verdict}");
+    assert!(verdict.contains("built-in template"), "{verdict}");
+    let verdict = ok(&home, &["verdict", "newcomer", "--no-llm"]);
+    assert!(verdict.contains("Fast-track github:newcomer"), "{verdict}");
+    assert!(verdict.contains("rests on zig alone"), "{verdict}");
 
     // Someone rewrites the peer's ledger without its key.
     let ledger = zig.join(".trust/ledger.jsonl");

@@ -186,12 +186,55 @@ the real data shows account age barely separates spam from honest work anyway.
 
 ## Verdicts
 
-`triage::decide` combines the two sides:
+`triage::assess` decides and gathers the evidence behind the decision.
 
 - **Quarantined** when denouncement support reaches 1.0 (your own word, or
   independent projects you trust adding up to it), or when the author matched a
   campaign and vouches don't reach 1.0.
 - **Trusted** when vouch support reaches 0.5.
-- **Clean newcomer** otherwise. Never auto-blocked.
+- **Clean newcomer** otherwise. Never auto-blocked. Weaker denouncements come
+  with the reason and a "review first" note, but don't block.
 
-Weaker denouncements don't block, but they come with a "review first" warning.
+Identity (vouches) and behavior (campaigns) stay separate until this point.
+
+### Single-source check
+
+For every verdict, `assess` removes each contributing project in turn (every
+project on any path the evidence took, not just the ones that spoke) and
+decides again. If any one removal changes the answer, the card says so:
+*"Flagged by a single source (zig) — review before blocking."* Because the
+max-flow is small, this costs around 100–350 µs per verdict, so it runs on
+every PR rather than only on request.
+
+**Trade-off:** we check single removals, not pairs. Two colluding projects
+that are each individually necessary still show up (both are listed). Two that
+are each individually *redundant* but jointly decisive don't. Checking all pairs
+is quadratic in contributors; single removals already catch the case that
+matters most, a verdict hanging on one project's word.
+
+### Explanations
+
+Every verdict gets a two-sentence summary and an evidence card: who vouched or
+denounced, through which projects, when, how much each counted, any fading or
+appeal, campaign stats, and the single-source result. Weights are shown as a
+share of the maintainer's own word, never as a bare score, and a real but tiny
+contribution reads "under 1%" rather than "0%".
+
+### The optional LLM
+
+If `GROQ_API_KEY` and `GROQ_MODEL` are set (in the environment or `.env`), the
+evidence JSON is sent to Groq's OpenAI-compatible API with instructions to write
+the same two sentences in plainer words. The model is configurable and never
+hardcoded.
+
+The LLM only rewords; it never decides. Its reply is discarded in favor of the
+template if the request fails, times out (8 s), is rate-limited, returns
+nothing usable, or **doesn't mention the verdict it was given**. Qwen-style
+`<think>` blocks are stripped. The output says which one wrote the summary, and
+why the template was used if an LLM was configured. The key is never logged:
+`GroqConfig`'s `Debug` output leaves it out.
+
+**Trade-off: what leaves the machine.** The evidence JSON contains handles,
+project names and denouncement reasons, which are all public data. It contains
+no PR content. Projects that don't want to send even that simply don't set a
+key.
