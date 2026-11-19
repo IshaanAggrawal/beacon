@@ -15,6 +15,7 @@ use beacon::ledger::sync::{fetch_peer, load_network, peers_dir};
 use beacon::ledger::vouch_td::{Handle, Standing, VouchList};
 use beacon::ledger::{Attestation, Kind, LEDGER_FILE, Ledger, POLICY_FILE, Policy, TRUST_DIR};
 use beacon::report;
+use beacon::sim::{self, World, WorldConfig};
 
 #[derive(Parser)]
 #[command(name = "beacon", version, about)]
@@ -115,6 +116,18 @@ enum Command {
     Peers,
     /// Explain what the projects you trust say about a user.
     Why { user: String },
+    /// Replay a simulated federation through flat Vouch and through beacon.
+    Bench {
+        /// First seed to run.
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        /// How many consecutive seeds to run.
+        #[arg(long, default_value_t = 1)]
+        seeds: u64,
+        /// Make paraphrased spam vary its structure too (0 to 1).
+        #[arg(long, default_value_t = 0.0)]
+        jitter: f64,
+    },
 }
 
 #[derive(Args)]
@@ -188,6 +201,35 @@ fn run(cli: Cli) -> Result<ExitCode> {
             let view =
                 TrustEngine::new(&net, &policy.project.id, policy.settings.clone(), now).run();
             print!("{}", report::peers(&view));
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Bench {
+            seed,
+            seeds,
+            jitter,
+        } => {
+            for s in seed..seed + seeds {
+                let world = World::generate(WorldConfig {
+                    seed: s,
+                    layout_jitter: jitter,
+                    ..WorldConfig::default()
+                });
+                let started = std::time::Instant::now();
+                let run = sim::run(&world);
+                print!("{}", sim::table(&world, &run));
+                print!(
+                    "
+{}",
+                    sim::bench::false_blocks(&run)
+                );
+                println!(
+                    "
+Judged {} PRs in {:.0} ms.
+",
+                    world.prs.len(),
+                    started.elapsed().as_secs_f64() * 1000.0
+                );
+            }
             Ok(ExitCode::SUCCESS)
         }
         Command::Why { user } => {

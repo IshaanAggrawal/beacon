@@ -7,4 +7,5 @@ pub mod campaign;
 pub mod graph;
 pub mod ledger;
 pub mod report;
+pub mod sim;
 pub mod triage;
