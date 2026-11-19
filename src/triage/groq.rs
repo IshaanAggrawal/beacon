@@ -274,12 +274,41 @@ mod tests {
         );
         std::thread::spawn(move || {
             if let Ok((mut stream, _)) = listener.accept() {
-                let mut buf = [0u8; 16384];
-                let _ = stream.read(&mut buf);
+                read_request(&mut stream);
                 let _ = stream.write_all(response.as_bytes());
+                let _ = stream.flush();
             }
         });
         format!("http://{addr}")
+    }
+
+    /// Reads a whole HTTP request: headers, then exactly Content-Length bytes.
+    /// Answering before the body is read and then closing makes Windows reset
+    /// the connection, which the client sees as "connection aborted".
+    fn read_request(stream: &mut std::net::TcpStream) {
+        let mut data = Vec::new();
+        let mut buf = [0u8; 4096];
+        let header_end = loop {
+            match stream.read(&mut buf) {
+                Ok(0) | Err(_) => return,
+                Ok(n) => data.extend_from_slice(&buf[..n]),
+            }
+            if let Some(pos) = data.windows(4).position(|w| w == b"\r\n\r\n") {
+                break pos + 4;
+            }
+        };
+        let headers = String::from_utf8_lossy(&data[..header_end]).to_ascii_lowercase();
+        let length: usize = headers
+            .lines()
+            .find_map(|l| l.strip_prefix("content-length:"))
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0);
+        while data.len() < header_end + length {
+            match stream.read(&mut buf) {
+                Ok(0) | Err(_) => return,
+                Ok(n) => data.extend_from_slice(&buf[..n]),
+            }
+        }
     }
 
     fn cfg(base_url: String) -> GroqConfig {

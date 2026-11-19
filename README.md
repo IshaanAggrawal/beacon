@@ -43,6 +43,17 @@ Sybil ring**, and press **Replay 14 days**. Things to watch:
 
 You can link straight to a run: `/?hostile=1&sybil=1&play=320`.
 
+### Deploy it
+
+It's one container with no database or disk. Run it anywhere:
+
+```sh
+docker run --rm -p 8080:8080 ghcr.io/ishaanaggrawal/beacon:latest
+```
+
+`render.yaml` sets it up as a free Render web service in a few clicks. Steps,
+limits and settings are in [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ## Results
 
 Fourteen simulated days, 30 projects (Ghostty's real list included, with
