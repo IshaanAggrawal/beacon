@@ -132,6 +132,8 @@ pub struct Run {
     pub false_blocks: Vec<FalseBlock>,
     /// beacon's verdict and evidence for every PR, in stream order.
     pub evidence: Vec<Evidence>,
+    /// Whether each system blocked each PR, in `System::ALL` order.
+    pub blocked: Vec<[bool; 4]>,
     pub campaign_flags: BTreeMap<String, DateTime<Utc>>,
 }
 
@@ -148,6 +150,7 @@ pub fn run(world: &World) -> Run {
     let mut flagged: BTreeMap<String, DateTime<Utc>> = BTreeMap::new();
     let mut author_cluster: HashMap<String, usize> = HashMap::new();
     let mut evidence = Vec::with_capacity(world.prs.len());
+    let mut blocked_by = Vec::with_capacity(world.prs.len());
     let mut false_blocks = Vec::new();
     // Trust views only change when the set of flagged accounts does.
     let mut views: HashMap<String, (usize, TrustView)> = HashMap::new();
@@ -199,7 +202,8 @@ pub fn run(world: &World) -> Run {
         }
         evidence.push(ev);
 
-        for system in System::ALL {
+        let mut row = [false; 4];
+        for (n, system) in System::ALL.into_iter().enumerate() {
             let blocked = match system {
                 System::FlatRequireVouch => !flat_vouched(&net, &pr.target, author),
                 System::FlatDenounceOnly => flat_denounced(&net, &pr.target, author),
@@ -213,6 +217,7 @@ pub fn run(world: &World) -> Run {
                 }
                 System::Beacon => tier == Tier::Quarantined,
             };
+            row[n] = blocked;
             let score = scores.get_mut(&system).expect("all systems scored");
             *score.prs.entry(pr.truth).or_default() += 1;
             if let Some(c) = pr.campaign {
@@ -239,12 +244,14 @@ pub fn run(world: &World) -> Run {
                 }
             }
         }
+        blocked_by.push(row);
     }
 
     Run {
         scores,
         false_blocks,
         evidence,
+        blocked: blocked_by,
         campaign_flags: flagged,
     }
 }
