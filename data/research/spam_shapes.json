@@ -1,0 +1,270 @@
+{
+  "collected": "2026-11-19",
+  "note": "Aggregates only. No PR text, usernames or repository names are stored.",
+  "samples": [
+    {
+      "label": "hacktoberfest-2020-spam",
+      "query": "is:pr label:spam created:2020-10-01..2020-10-31",
+      "prs_seen": 1000,
+      "authors_seen": 772,
+      "authors_with_multiple_prs": 113,
+      "share_of_prs_from_repeat_authors": 0.341,
+      "distinct_repos_per_repeat_author": {
+        "p10": 1,
+        "p25": 1,
+        "p50": 1,
+        "p75": 2,
+        "p90": 2
+      },
+      "hours_between_prs_of_same_author": {
+        "p10": 0.02,
+        "p25": 0.06,
+        "p50": 0.26,
+        "p75": 9.88,
+        "p90": 47.27
+      },
+      "detailed_sample": 120,
+      "files_changed": {
+        "p10": 1,
+        "p25": 1,
+        "p50": 1,
+        "p75": 1,
+        "p90": 2
+      },
+      "lines_changed": {
+        "p10": 2,
+        "p25": 2,
+        "p50": 13,
+        "p75": 50,
+        "p90": 126
+      },
+      "hunks": {
+        "p10": 1,
+        "p25": 1,
+        "p50": 1,
+        "p75": 1,
+        "p90": 2
+      },
+      "share_docs_only": 0.358,
+      "share_readme_only": 0.183,
+      "top_extensions": [
+        [
+          ".md",
+          33
+        ],
+        [
+          ".py",
+          17
+        ],
+        [
+          "(none)",
+          15
+        ],
+        [
+          ".html",
+          11
+        ],
+        [
+          ".cpp",
+          9
+        ],
+        [
+          ".css",
+          5
+        ],
+        [
+          ".js",
+          5
+        ],
+        [
+          ".json",
+          5
+        ]
+      ],
+      "account_age_days_at_pr": {
+        "p10": 20,
+        "p25": 54,
+        "p50": 388,
+        "p75": 857,
+        "p90": 1799
+      },
+      "share_accounts_under_30_days": 0.192
+    },
+    {
+      "label": "ai-era-slop",
+      "query": "is:pr label:slop created:2025-01-01..2026-11-19",
+      "prs_seen": 1000,
+      "authors_seen": 388,
+      "authors_with_multiple_prs": 96,
+      "share_of_prs_from_repeat_authors": 0.708,
+      "distinct_repos_per_repeat_author": {
+        "p10": 1,
+        "p25": 1,
+        "p50": 1,
+        "p75": 1,
+        "p90": 2
+      },
+      "hours_between_prs_of_same_author": {
+        "p10": 0.01,
+        "p25": 0.27,
+        "p50": 1.6,
+        "p75": 11.9,
+        "p90": 109.41
+      },
+      "detailed_sample": 120,
+      "files_changed": {
+        "p10": 1,
+        "p25": 1,
+        "p50": 2,
+        "p75": 10,
+        "p90": 25
+      },
+      "lines_changed": {
+        "p10": 1,
+        "p25": 4,
+        "p50": 85,
+        "p75": 452,
+        "p90": 1948
+      },
+      "hunks": {
+        "p10": 1,
+        "p25": 1,
+        "p50": 3,
+        "p75": 16,
+        "p90": 48
+      },
+      "share_docs_only": 0.267,
+      "share_readme_only": 0.158,
+      "top_extensions": [
+        [
+          ".md",
+          67
+        ],
+        [
+          ".json",
+          27
+        ],
+        [
+          ".ts",
+          21
+        ],
+        [
+          ".py",
+          19
+        ],
+        [
+          ".yml",
+          15
+        ],
+        [
+          ".toml",
+          8
+        ],
+        [
+          "(none)",
+          7
+        ],
+        [
+          ".sh",
+          7
+        ]
+      ],
+      "account_age_days_at_pr": {
+        "p10": 6,
+        "p25": 13,
+        "p50": 586,
+        "p75": 3302,
+        "p90": 4641
+      },
+      "share_accounts_under_30_days": 0.4
+    },
+    {
+      "label": "ai-era-ai-slop",
+      "query": "is:pr label:\"ai-slop\"",
+      "prs_seen": 627,
+      "authors_seen": 368,
+      "authors_with_multiple_prs": 95,
+      "share_of_prs_from_repeat_authors": 0.565,
+      "distinct_repos_per_repeat_author": {
+        "p10": 1,
+        "p25": 1,
+        "p50": 1,
+        "p75": 1,
+        "p90": 2
+      },
+      "hours_between_prs_of_same_author": {
+        "p10": 0.01,
+        "p25": 0.09,
+        "p50": 1.12,
+        "p75": 28.18,
+        "p90": 435.66
+      },
+      "detailed_sample": 120,
+      "files_changed": {
+        "p10": 1,
+        "p25": 2,
+        "p50": 3,
+        "p75": 5,
+        "p90": 21
+      },
+      "lines_changed": {
+        "p10": 10,
+        "p25": 32,
+        "p50": 75,
+        "p75": 284,
+        "p90": 1424
+      },
+      "hunks": {
+        "p10": 1,
+        "p25": 2,
+        "p50": 4,
+        "p75": 15,
+        "p90": 34
+      },
+      "share_docs_only": 0.133,
+      "share_readme_only": 0.017,
+      "top_extensions": [
+        [
+          ".py",
+          58
+        ],
+        [
+          ".md",
+          28
+        ],
+        [
+          ".rst",
+          21
+        ],
+        [
+          "(none)",
+          18
+        ],
+        [
+          ".rs",
+          14
+        ],
+        [
+          ".yaml",
+          13
+        ],
+        [
+          ".toml",
+          13
+        ],
+        [
+          ".yml",
+          10
+        ]
+      ],
+      "account_age_days_at_pr": {
+        "p10": 299,
+        "p25": 928,
+        "p50": 1509,
+        "p75": 2803,
+        "p90": 4664
+      },
+      "share_accounts_under_30_days": 0.008
+    }
+  ]
+}

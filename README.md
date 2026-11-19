@@ -20,8 +20,9 @@ beacon builds on [Vouch](https://github.com/mitchellh/vouch) and reads its
 `VOUCHED.td` format directly. See [docs/RESEARCH.md](docs/RESEARCH.md) for what we
 learned from Ghostty's real list and what a network adds over a flat list.
 
-> **Status:** early. Signed ledgers, Vouch import, peer sync and the trust graph
-> work. Campaign detection, verdicts and the web demo are in progress.
+> **Status:** early. Signed ledgers, Vouch import, peer sync, the trust graph and
+> campaign detection work. Explanations, the LLM explainer and the web demo are
+> in progress.
 
 ## Try it
 
@@ -46,6 +47,18 @@ beacon peers                                    # how much you trust each projec
 beacon why github:newcomer                      # what the projects you trust say about someone
 beacon verify                                   # check every signature and the hash chain
 ```
+
+Compare beacon with flat Vouch lists on a simulated federation:
+
+```sh
+cargo run --release -- bench --seed 1 --seeds 5
+```
+
+On five seeds, beacon caught 94–95% of coordinated campaign spam, blocked no
+honest PRs, and ignored every smear from a hostile project and a 40-project
+Sybil ring. Requiring a vouch blocked every newcomer. Results, real-world spam
+statistics and the limits of all this are in
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 How it works and why it's built this way: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

@@ -6,6 +6,9 @@ benchmark and web demo are thin layers over it.
 ```
 src/ledger/    what a project writes down: policy, signed ledger, Vouch import, peer sync
 src/graph/     what a project concludes: trust in other projects, evidence about users
+src/campaign/  cross-project campaign detection from content-free fingerprints
+src/triage/    combining trust and behavior into a verdict
+src/sim/       seeded federation simulator and the benchmark
 src/report.rs  plain-English rendering of graph results
 src/main.rs    CLI
 ```
@@ -135,3 +138,60 @@ subjective by design: each project only changes its own view.
 If a project's ledger both vouches and denounces someone, the later statement
 wins. If a raw Vouch file lists both, the denouncement wins: a stale vouch
 shouldn't hide a ban.
+
+## Campaign detection
+
+Real spam-labelled PRs informed this design; see
+[BENCHMARKS.md](BENCHMARKS.md#1-what-real-spam-looks-like).
+
+### Fingerprints, not contents
+
+Projects compare PRs without sharing them. A fingerprint keeps:
+
+- a salted SHA-256 of the author handle,
+- the repo and the hour,
+- a 64-bit SimHash of the words (title, body, added lines),
+- a 64-bit SimHash of the *layout*: the sequence of line kinds added
+  (heading, bullet, link, code, prose...) as 1-, 2- and 3-grams,
+- coarse diff geometry: a bitset of file extensions, log2 buckets for files,
+  lines and hunks, a docs-only flag, an account-age bucket.
+
+No text, no code, no handle. **Trade-off:** a salted hash of a public handle is
+pseudonymous, not anonymous. Anyone holding the salt can hash a list of known
+handles and match them. The salt is shared within a federation, so this
+protects against a leaked fingerprint store, not against a member.
+
+### Linking and clustering
+
+Two PRs from *different* authors within 72 hours are linked when their text
+hashes are within 6 bits (copy-paste), or when both are documentation-only, of
+40 lines or fewer, with layout hashes within 4 bits and matching diff shapes
+(paraphrase). Linked PRs form clusters. A cluster becomes a campaign at 4
+distinct accounts **and** 4 distinct repos. One person repeating themselves, or
+a docs sprint in two repos, never qualifies.
+
+Matching is brute force over the window: exact, simple, and fast enough at
+federation volumes (the benchmark judges ~1,900 PRs, including trust
+computation, in under half a second).
+
+**Trade-off: layout only for docs.** Layout survives paraphrasing, but short
+code diffs share layouts for innocent reasons, and our first benchmark run
+produced 14 false blocks that way. Restricting it to documentation-only PRs
+removed them. The cost: code-shaped campaigns are only caught when their text
+is nearly identical.
+
+**What it deliberately doesn't do:** judge whether text "looks AI-written",
+or treat new accounts as suspicious. Both would hurt honest newcomers, and
+the real data shows account age barely separates spam from honest work anyway.
+
+## Verdicts
+
+`triage::decide` combines the two sides:
+
+- **Quarantined** when denouncement support reaches 1.0 (your own word, or
+  independent projects you trust adding up to it), or when the author matched a
+  campaign and vouches don't reach 1.0.
+- **Trusted** when vouch support reaches 0.5.
+- **Clean newcomer** otherwise. Never auto-blocked.
+
+Weaker denouncements don't block, but they come with a "review first" warning.
