@@ -80,12 +80,43 @@ pub struct Explanation {
     pub author: Author,
 }
 
-const SYSTEM_PROMPT: &str = "You write triage notes for open-source maintainers deciding what to do with a pull request. \
-You get a JSON object computed by a trust system. Write exactly two plain-English sentences. \
-Sentence one: the verdict (Trusted, Clean newcomer or Quarantined) and the main reason, naming the projects involved. \
-Sentence two: what the maintainer should do next; if counterfactual.flips is not empty, say the verdict rests on a single source and should be reviewed before acting. \
-Use only facts from the JSON. Express weights as percentages of the maintainer's own word. \
-Never speculate about whether anything was written by AI. Never treat being new as suspicious. /no_think";
+// The model gets a correct draft and pre-digested facts, and is asked to
+// reword, not to reason. Given the raw evidence JSON, a live model picked
+// the wrong main reason and invented single-source claims.
+const SYSTEM_PROMPT: &str = "You help open-source maintainers triage pull requests. You get a verdict, a few facts, and a correct two-sentence draft. Rewrite the draft so it reads naturally to a busy maintainer: exactly two sentences, plain English. Keep the verdict, every project name, every percentage, any campaign details and any single-source warning. Do not add facts, numbers or reasons that are not in the input. Do not mention scores, JSON, counterfactuals or algorithms. Never speculate about whether anything was written by AI, and never treat being new as suspicious. /no_think";
+
+fn prompt_facts(e: &Evidence) -> Value {
+    let sources = |list: &[super::evidence::Source]| -> Vec<Value> {
+        list.iter()
+            .map(|s| {
+                json!({
+                    "project": if s.project == e.root { "you" } else { s.project.as_str() },
+                    "counts_for": explain::share(s.weight),
+                    "reason": s.reason,
+                })
+            })
+            .collect()
+    };
+    let flips: Vec<&str> = e
+        .counterfactual
+        .flips
+        .iter()
+        .map(|f| f.without.as_str())
+        .collect();
+    json!({
+        "verdict": e.tier.label(),
+        "contributor": e.subject,
+        "your_project": e.root,
+        "draft": explain::summary(e),
+        "vouched_for_by": sources(&e.vouches.sources),
+        "denounced_by": sources(&e.denouncements.sources),
+        "campaign": e.campaign.as_ref().map(|c| format!(
+            "{} near-identical PRs from {} accounts across {} repos within {} hours",
+            c.prs, c.accounts, c.repos, c.hours.max(1)
+        )),
+        "verdict_hangs_on": if flips.is_empty() { Value::Null } else { json!(flips) },
+    })
+}
 
 /// Explains with the LLM if configured and healthy, otherwise with the template.
 pub fn explain(e: &Evidence, cfg: Option<&GroqConfig>) -> Explanation {
@@ -122,7 +153,7 @@ fn ask(e: &Evidence, cfg: &GroqConfig) -> Result<String, String> {
         "max_tokens": 400,
         "messages": [
             { "role": "system", "content": SYSTEM_PROMPT },
-            { "role": "user", "content": serde_json::to_string(e).map_err(|e| e.to_string())? },
+            { "role": "user", "content": prompt_facts(e).to_string() },
         ],
     });
     let mut resp = agent
@@ -146,11 +177,11 @@ fn ask(e: &Evidence, cfg: &GroqConfig) -> Result<String, String> {
     let raw = json["choices"][0]["message"]["content"]
         .as_str()
         .ok_or("the LLM's reply had no text")?;
-    clean(raw, e.tier)
+    clean(raw, e)
 }
 
-/// Strips reasoning blocks and checks the note agrees with the verdict.
-fn clean(raw: &str, tier: Tier) -> Result<String, String> {
+/// Strips reasoning blocks and checks the note says what the evidence says.
+fn clean(raw: &str, e: &Evidence) -> Result<String, String> {
     let mut text = raw.to_string();
     while let (Some(start), Some(end)) = (text.find("<think>"), text.find("</think>")) {
         if end < start {
@@ -164,13 +195,42 @@ fn clean(raw: &str, tier: Tier) -> Result<String, String> {
         return Err("the LLM's reply was empty or too long".into());
     }
     let lower = text.to_lowercase();
-    let agrees = match tier {
-        Tier::Quarantined => lower.contains("quarantin"),
-        Tier::Trusted => lower.contains("trusted") || lower.contains("fast-track"),
-        Tier::CleanNewcomer => lower.contains("newcomer") || lower.contains("new contributor"),
+    let has = |words: &[&str]| words.iter().any(|w| lower.contains(w));
+
+    let agrees = match e.tier {
+        Tier::Quarantined => has(&["quarantin"]),
+        Tier::Trusted => has(&["trusted", "fast-track"]),
+        Tier::CleanNewcomer => has(&["newcomer", "new contributor", "new to you"]),
     };
     if !agrees {
         return Err("the LLM's note didn't match the verdict".into());
+    }
+    if e.campaign.is_some() && !has(&["campaign", "coordinated", "wave"]) {
+        return Err("the LLM's note left out the campaign".into());
+    }
+    let single = has(&[
+        "single source",
+        "rests on",
+        "depends on",
+        "hangs on",
+        "leans on",
+    ]);
+    if !e.counterfactual.flips.is_empty() && !single && !has(&["review before"]) {
+        return Err("the LLM's note left out the single-source warning".into());
+    }
+    if e.counterfactual.flips.is_empty() && has(&["single source"]) {
+        return Err("the LLM's note talked about a single source when there isn't one".into());
+    }
+    // The main speaker should be named, unless it's the maintainer's own project.
+    let main = match e.tier {
+        Tier::Trusted => e.vouches.sources.first(),
+        _ if e.campaign.is_some() => None,
+        _ => e.denouncements.sources.first(),
+    };
+    if let Some(src) = main.filter(|s| s.project != e.root) {
+        if !lower.contains(&src.project.to_lowercase()) {
+            return Err(format!("the LLM's note didn't name {}", src.project));
+        }
     }
     Ok(text)
 }
@@ -287,6 +347,66 @@ mod tests {
         assert!(
             matches!(x.author, Author::Template { why: Some(w) } if w.contains("didn't match"))
         );
+    }
+
+    #[test]
+    fn a_reply_that_drops_the_campaign_is_rejected() {
+        use crate::triage::evidence::CampaignEvidence;
+        let mut e = evidence(Tier::Quarantined);
+        e.campaign = Some(CampaignEvidence {
+            prs: 4,
+            accounts: 4,
+            repos: 4,
+            hours: 3,
+            text_links: 0,
+            layout_links: 6,
+            young_share: 0.0,
+        });
+        // What a live model actually said for this case.
+        let url = serve_once(
+            "200 OK",
+            &reply(
+                "The PR is quarantined because the sole vouch from mirror-00 carries a weight of 0.0001%. Proceed with standard review.",
+            ),
+        );
+        let x = explain(&e, Some(&cfg(url)));
+        assert!(matches!(x.author, Author::Template { why: Some(w) } if w.contains("campaign")));
+    }
+
+    #[test]
+    fn an_invented_single_source_claim_is_rejected() {
+        let url = serve_once(
+            "200 OK",
+            &reply(
+                "github:x is a clean newcomer. This does not rest on a single source, so review normally.",
+            ),
+        );
+        let x = explain(&evidence(Tier::CleanNewcomer), Some(&cfg(url)));
+        assert!(
+            matches!(x.author, Author::Template { why: Some(w) } if w.contains("single source"))
+        );
+    }
+
+    #[test]
+    fn the_prompt_carries_a_draft_and_formatted_numbers() {
+        let mut e = evidence(Tier::CleanNewcomer);
+        e.denouncements
+            .sources
+            .push(crate::triage::evidence::Source {
+                project: "mirror-00".into(),
+                weight: 0.000_001,
+                path: vec![],
+                reason: None,
+                age_days: Some(1),
+                strength: 1.0,
+                provisional: false,
+                under_appeal: false,
+                actor: None,
+            });
+        let facts = prompt_facts(&e);
+        assert_eq!(facts["draft"], explain::summary(&e));
+        assert_eq!(facts["denounced_by"][0]["counts_for"], "under 1%");
+        assert!(facts["verdict_hangs_on"].is_null());
     }
 
     #[test]

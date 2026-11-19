@@ -8,7 +8,7 @@ use super::verdict::Tier;
 use crate::report::pct;
 
 /// Like `pct`, but doesn't round a real, tiny contribution down to "0%".
-fn share(x: f64) -> String {
+pub(crate) fn share(x: f64) -> String {
     if x > 0.0 && x < 0.005 {
         "under 1%".into()
     } else {
