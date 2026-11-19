@@ -223,18 +223,27 @@ contribution reads "under 1%" rather than "0%".
 ### The optional LLM
 
 If `GROQ_API_KEY` and `GROQ_MODEL` are set (in the environment or `.env`), the
-evidence JSON is sent to Groq's OpenAI-compatible API with instructions to write
-the same two sentences in plainer words. The model is configurable and never
-hardcoded.
+template's draft and a small set of pre-formatted facts (verdict, who vouched or
+denounced and how much each counts, campaign details, which projects the
+verdict hangs on) go to Groq's OpenAI-compatible API, which rewrites the draft
+in plainer words. The model is configurable and never hardcoded.
+
+The first version sent the raw evidence JSON and asked the model to reason from
+it. Against a live Qwen model, that gave the wrong main reason for a campaign
+catch ("quarantined because the sole vouch carries 0.0001%"), and claims about
+single sources that weren't true. Giving it a correct draft to reword fixed all
+six sample cases.
 
 The LLM only rewords; it never decides. Its reply is discarded in favor of the
-template if the request fails, times out (8 s), is rate-limited, returns
-nothing usable, or **doesn't mention the verdict it was given**. Qwen-style
-`<think>` blocks are stripped. The output says which one wrote the summary, and
+template if the request fails, times out (8 s) or is rate-limited, or if it
+returns nothing usable. It's also discarded if the note **doesn't mention the
+verdict, leaves out the campaign, leaves out or invents a single-source
+warning, or doesn't name the main project**. Qwen-style `<think>` blocks are
+stripped. The output says which one wrote the summary, and
 why the template was used if an LLM was configured. The key is never logged:
 `GroqConfig`'s `Debug` output leaves it out.
 
-**Trade-off: what leaves the machine.** The evidence JSON contains handles,
-project names and denouncement reasons, which are all public data. It contains
-no PR content. Projects that don't want to send even that simply don't set a
+**Trade-off: what leaves the machine.** The facts contain handles, project
+names and denouncement reasons, which are all public data. They contain no PR
+content. Projects that don't want to send even that simply don't set a
 key.
