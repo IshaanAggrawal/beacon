@@ -12,6 +12,7 @@ publish = false
 anyhow = "1"
 chrono = { version = "0.4.45", default-features = false, features = ["serde", "clock", "std"] }
 clap = { version = "4", features = ["derive"] }
+dotenvy = "0.15.7"
 ed25519-dalek = "3.0.0"
 getrandom = "0.4.3"
 hex = "0.4.3"
