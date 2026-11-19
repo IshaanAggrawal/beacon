@@ -486,6 +486,41 @@ impl World {
         }
     }
 
+    /// Builds the default world, optionally without the hostile project or
+    /// the Sybil ring. Both variants share the same PR stream, so the only
+    /// difference between runs is the attack.
+    pub fn scenario(seed: u64, hostile: bool, sybils: bool) -> Self {
+        let world = Self::generate(WorldConfig {
+            seed,
+            ..WorldConfig::default()
+        });
+        let mut drop: Vec<String> = Vec::new();
+        if !hostile {
+            drop.push(HOSTILE.to_string());
+        }
+        if !sybils {
+            drop.extend(world.sybils.iter().cloned());
+        }
+        world.without(&drop)
+    }
+
+    /// Removes projects and every trust link pointing at them, as if they
+    /// had never joined. Accounts and PRs are untouched.
+    pub fn without(mut self, projects: &[String]) -> Self {
+        for p in projects {
+            self.ledgers.remove(p);
+        }
+        for atts in self.ledgers.values_mut() {
+            atts.retain(|a| a.kind != Kind::TrustPeer || !projects.contains(&a.subject));
+        }
+        self.sybils.retain(|s| !projects.contains(s));
+        self
+    }
+
+    pub fn has_hostile(&self) -> bool {
+        self.ledgers.contains_key(HOSTILE)
+    }
+
     pub fn network(&self) -> Network {
         let mut net = Network::new();
         for (id, atts) in &self.ledgers {
@@ -881,6 +916,26 @@ mod tests {
                 .iter()
                 .zip(&b.prs)
                 .all(|(x, y)| x.event.author == y.event.author && x.event.at == y.event.at)
+        );
+    }
+
+    #[test]
+    fn scenarios_share_one_pr_stream() {
+        let attacked = World::scenario(3, true, true);
+        let calm = World::scenario(3, false, false);
+        assert_eq!(attacked.prs.len(), calm.prs.len());
+        assert!(attacked.has_hostile() && !calm.has_hostile());
+        assert!(calm.sybils.is_empty());
+        let net = calm.network();
+        assert!(
+            net.projects
+                .values()
+                .all(|p| !p.peers.contains_key(HOSTILE))
+        );
+        assert!(
+            net.projects
+                .values()
+                .all(|p| !p.peers.keys().any(|k| k.starts_with("mirror-")))
         );
     }
 
