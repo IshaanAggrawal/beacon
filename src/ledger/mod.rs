@@ -5,6 +5,7 @@ pub mod attestation;
 pub mod import;
 pub mod policy;
 pub mod store;
+pub mod sync;
 pub mod vouch_td;
 
 pub use attestation::{Attestation, Kind, Origin};
