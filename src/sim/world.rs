@@ -14,7 +14,7 @@ use crate::campaign::{FileChange, PrEvent};
 use crate::graph::Network;
 use crate::ledger::import::{import_vouch_list, parse_history};
 use crate::ledger::vouch_td::VouchList;
-use crate::ledger::{Attestation, Kind};
+use crate::ledger::{Attestation, Kind, Origin};
 
 const GHOSTTY_LIST: &str = include_str!("../../data/ghostty/VOUCHED.td");
 const GHOSTTY_HISTORY: &str = include_str!("../../data/ghostty/history.jsonl");
@@ -110,6 +110,14 @@ pub struct World {
     pub prs: Vec<SimPr>,
 }
 
+/// Simulated entries stand in for signed ones. The simulator never checks
+/// signatures; it only needs them to read as dated, first-hand statements.
+fn simulated() -> Origin {
+    Origin::Signed {
+        key: "simulated".into(),
+    }
+}
+
 struct Builder {
     rng: Rng,
     start: DateTime<Utc>,
@@ -124,6 +132,7 @@ impl Builder {
         let at = self.start - TimeDelta::hours(self.rng.range(24, 300 * 24) as i64);
         let mut a = Attestation::new(kind, issuer, subject, at);
         a.reason = reason.map(str::to_string);
+        a.origin = simulated();
         self.ledgers.entry(issuer.to_string()).or_default().push(a);
     }
 
@@ -131,6 +140,7 @@ impl Builder {
         let at = self.start - TimeDelta::days(400);
         let mut a = Attestation::new(Kind::TrustPeer, from, to, at);
         a.weight = Some((weight * 100.0).round() / 100.0);
+        a.origin = simulated();
         self.ledgers.entry(from.to_string()).or_default().push(a);
     }
 

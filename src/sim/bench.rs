@@ -12,10 +12,9 @@ use chrono::{DateTime, Utc};
 
 use super::world::{Truth, World};
 use crate::campaign::{Cluster, Detector, DetectorConfig, Fingerprint, Salt};
-use crate::graph::trust::Polarity;
 use crate::graph::{Network, TrustEngine, TrustView};
 use crate::ledger::Settings;
-use crate::triage::{Thresholds, Tier, decide};
+use crate::triage::{Evidence, Thresholds, Tier, assess};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum System {
@@ -131,8 +130,8 @@ pub struct FalseBlock {
 pub struct Run {
     pub scores: BTreeMap<System, Score>,
     pub false_blocks: Vec<FalseBlock>,
-    /// beacon's verdict for every PR, in stream order.
-    pub verdicts: Vec<Tier>,
+    /// beacon's verdict and evidence for every PR, in stream order.
+    pub evidence: Vec<Evidence>,
     pub campaign_flags: BTreeMap<String, DateTime<Utc>>,
 }
 
@@ -148,7 +147,7 @@ pub fn run(world: &World) -> Run {
     let mut first_pr: BTreeMap<u8, DateTime<Utc>> = BTreeMap::new();
     let mut flagged: BTreeMap<String, DateTime<Utc>> = BTreeMap::new();
     let mut author_cluster: HashMap<String, usize> = HashMap::new();
-    let mut verdicts = Vec::with_capacity(world.prs.len());
+    let mut evidence = Vec::with_capacity(world.prs.len());
     let mut false_blocks = Vec::new();
     // Trust views only change when the set of flagged accounts does.
     let mut views: HashMap<String, (usize, TrustView)> = HashMap::new();
@@ -164,7 +163,8 @@ pub fn run(world: &World) -> Run {
             flagged.entry(author.clone()).or_insert(pr.event.at);
             author_cluster.entry(author.clone()).or_insert(idx);
         }
-        let in_campaign = flagged.contains_key(author);
+        // Once caught in a campaign, an account stays flagged.
+        let campaign = author_cluster.get(author).map(|i| detector.cluster_of(*i));
 
         let stale = views
             .get(&pr.target)
@@ -177,27 +177,27 @@ pub fn run(world: &World) -> Run {
             views.insert(pr.target.clone(), (flagged.len(), engine.run()));
         }
         let view = &views[&pr.target].1;
-        let vouches = view.support(author, Polarity::For).total;
-        let against_support = view.support(author, Polarity::Against);
-        let against = against_support.total;
-        let tier = decide(vouches, against, in_campaign, &thresholds);
-        verdicts.push(tier);
+        let ev = assess(view, author, campaign.as_ref(), &thresholds);
+        let tier = ev.tier;
+        let against = ev.denouncements.total;
         if tier == Tier::Quarantined && !pr.truth.is_bad() {
             false_blocks.push(FalseBlock {
                 author: author.clone(),
                 target: pr.target.clone(),
                 truth: pr.truth,
-                vouches,
+                vouches: ev.vouches.total,
                 denouncements: against,
-                denounced_by: against_support
-                    .statements
+                denounced_by: ev
+                    .denouncements
+                    .sources
                     .iter()
-                    .map(|s| (s.project.clone(), s.amount))
+                    .map(|s| (s.project.clone(), s.weight))
                     .collect(),
-                in_campaign,
-                cluster: author_cluster.get(author).map(|i| detector.cluster_of(*i)),
+                in_campaign: campaign.is_some(),
+                cluster: campaign.clone(),
             });
         }
+        evidence.push(ev);
 
         for system in System::ALL {
             let blocked = match system {
@@ -244,7 +244,7 @@ pub fn run(world: &World) -> Run {
     Run {
         scores,
         false_blocks,
-        verdicts,
+        evidence,
         campaign_flags: flagged,
     }
 }
@@ -259,6 +259,56 @@ fn flat_denounced(net: &Network, project: &str, who: &str) -> bool {
 
 fn pct(x: f64) -> String {
     format!("{:.1}%", x * 100.0)
+}
+
+/// A few PRs worth showing someone: one of each interesting situation.
+pub fn samples(world: &World, run: &Run) -> Vec<(&'static str, usize)> {
+    let find = |pred: &dyn Fn(usize) -> bool| (0..world.prs.len()).find(|i| pred(*i));
+    let pr = |i: usize| &world.prs[i];
+    let ev = |i: usize| &run.evidence[i];
+    let picks: [(&'static str, Option<usize>); 6] = [
+        (
+            "A reworded spam PR, caught as part of a campaign",
+            find(&|i| pr(i).campaign == Some(1) && ev(i).tier == Tier::Quarantined),
+        ),
+        (
+            "A repeat offender quarantined on denouncements",
+            find(&|i| pr(i).truth == Truth::RepeatOffender && ev(i).tier == Tier::Quarantined),
+        ),
+        (
+            "A repeat offender, let through with a warning",
+            find(&|i| {
+                pr(i).truth == Truth::RepeatOffender
+                    && ev(i).tier != Tier::Quarantined
+                    && !ev(i).denouncements.sources.is_empty()
+            }),
+        ),
+        (
+            "Someone the hostile project and Sybil ring are smearing",
+            find(&|i| {
+                world.smeared.contains(&pr(i).event.author) && pr(i).target == super::world::GHOSTTY
+            }),
+        ),
+        (
+            "A trusted contributor, vouched for two hops away",
+            find(&|i| {
+                ev(i).tier == Tier::Trusted
+                    && ev(i).vouches.sources.iter().all(|s| s.path.len() > 2)
+            }),
+        ),
+        (
+            "An honest newcomer nobody knows yet",
+            find(&|i| {
+                pr(i).truth == Truth::Newcomer
+                    && ev(i).vouches.sources.is_empty()
+                    && ev(i).denouncements.sources.is_empty()
+            }),
+        ),
+    ];
+    picks
+        .into_iter()
+        .filter_map(|(t, i)| i.map(|i| (t, i)))
+        .collect()
 }
 
 /// Plain-English list of the honest PRs beacon blocked, and why.
