@@ -20,15 +20,34 @@ beacon builds on [Vouch](https://github.com/mitchellh/vouch) and reads its
 `VOUCHED.td` format directly. See [docs/RESEARCH.md](docs/RESEARCH.md) for what we
 learned from Ghostty's real list and what a network adds over a flat list.
 
-> **Status:** early. Right now beacon can read and query Vouch files. The trust
-> graph, campaign detection and web demo are in progress.
+> **Status:** early. Signed ledgers, Vouch import, peer sync and the trust graph
+> work. Campaign detection, verdicts and the web demo are in progress.
 
 ## Try it
+
+Read an existing Vouch file:
 
 ```sh
 cargo run -- inspect data/ghostty/VOUCHED.td
 cargo run -- check data/ghostty/VOUCHED.td mitchellh   # exit 0 vouched, 1 denounced, 2 unknown
 ```
+
+Set up a project and connect it to another one:
+
+```sh
+beacon init myproject --maintainer alice        # writes .trust/ and a signing key
+beacon import .github/VOUCHED.td                # bring over an existing Vouch list
+beacon vouch github:newcomer --reason "solid first PR"
+beacon vouch github:student --provisional 30 --scope docs
+beacon denounce github:spammer --reason "same PR opened in 30 repos"
+beacon trust zig 0.8 --url https://github.com/ziglang/zig
+beacon sync                                     # fetch peers' signed ledgers (read-only)
+beacon peers                                    # how much you trust each project, and why
+beacon why github:newcomer                      # what the projects you trust say about someone
+beacon verify                                   # check every signature and the hash chain
+```
+
+How it works and why it's built this way: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Development
 
